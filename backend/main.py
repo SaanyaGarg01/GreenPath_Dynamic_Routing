@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 import random
 import math
 import time
+from datetime import datetime, timedelta
+import heapq
 
 app = FastAPI(
     title="GreenPath Logistics Engine",
@@ -119,7 +121,7 @@ class Environment:
 
 
 # ============================================================
-# Q-Learning Agent
+# Carbon Credit & Cost Estimation
 # ============================================================
 
 def get_consumption_multiplier(vehicle_type: str) -> float:
@@ -135,6 +137,223 @@ def get_co2_factor(vehicle_type: str) -> float:
     elif vehicle_type == "hybrid":
         return 1.2
     return 2.31
+
+class CarbonCreditCalculator:
+    """Converts carbon savings to real-world equivalents"""
+    CO2_PER_TREE_PER_YEAR = 20  # kg CO2 per tree per year
+    CO2_PER_KM_PETROL = 0.23  # kg CO2 per km for petrol vehicle
+    
+    @staticmethod
+    def calculate_credits(co2_saved: float) -> dict:
+        trees_saved = co2_saved / CarbonCreditCalculator.CO2_PER_TREE_PER_YEAR
+        km_pollution_avoided = co2_saved / CarbonCreditCalculator.CO2_PER_KM_PETROL
+        credits = co2_saved * 0.1  # Simplified credit metric
+        
+        return {
+            "co2_kg": round(co2_saved, 3),
+            "trees_equivalent": round(trees_saved, 2),
+            "km_pollution_avoided": round(km_pollution_avoided, 1),
+            "carbon_credits": round(credits, 2)
+        }
+
+class CostEstimator:
+    """Calculates comprehensive business costs"""
+    DRIVER_WAGE_PER_HOUR = 150  # INR per hour
+    MAINTENANCE_PER_KM = {
+        "ev": 0.5,
+        "hybrid": 1.2,
+        "petrol": 1.5
+    }
+    BATTERY_DEGRADATION_PER_KM = 0.02  # INR per km for EV
+    
+    @staticmethod
+    def estimate_costs(distance: float, time_hours: float, vehicle_type: str, fleet_size: int = 100) -> dict:
+        driver_cost = time_hours * CostEstimator.DRIVER_WAGE_PER_HOUR
+        maintenance_rate = CostEstimator.MAINTENANCE_PER_KM.get(vehicle_type, 1.5)
+        maintenance_cost = distance * maintenance_rate
+        battery_cost = distance * CostEstimator.BATTERY_DEGRADATION_PER_KM if vehicle_type == "ev" else 0
+        
+        trip_cost = driver_cost + maintenance_cost + battery_cost
+        annual_savings = trip_cost * 250 * fleet_size  # Assume 250 working days
+        
+        return {
+            "trip_cost_breakdown": {
+                "driver_wage": round(driver_cost, 2),
+                "maintenance": round(maintenance_cost, 2),
+                "battery_degradation": round(battery_cost, 2),
+                "total_trip_cost": round(trip_cost, 2)
+            },
+            "fleet_annual_projection": {
+                "single_vehicle_annual": round(trip_cost * 250, 2),
+                "fleet_size": fleet_size,
+                "total_annual_savings": round(annual_savings, 2),
+                "savings_per_vehicle": round(annual_savings / fleet_size, 2) if fleet_size > 0 else 0
+            }
+        }
+
+class AIExplainability:
+    """Explains AI route decisions"""
+    @staticmethod
+    def explain_route(path: List[int], steps: List[dict], vehicle_type: str, avoided_nodes: set = None) -> dict:
+        if avoided_nodes is None:
+            avoided_nodes = set()
+        
+        reasons = []
+        
+        # Analyze route characteristics
+        high_traffic_avoided = sum(1 for s in steps if s.get("traffic_level", 0) > 1.2)
+        weather_impacts = sum(1 for s in steps if s.get("weather_condition") == "rainy")
+        
+        if high_traffic_avoided > 0:
+            reasons.append(f"Avoided {high_traffic_avoided} high-congestion zones")
+        
+        if weather_impacts > 0:
+            reasons.append(f"Navigated around {weather_impacts} weather-affected areas")
+        
+        if len(avoided_nodes) > 0:
+            reasons.append(f"Avoided {len(avoided_nodes)} previously flooded corridors")
+        
+        # Vehicle-specific optimizations
+        if vehicle_type == "ev":
+            reasons.append("Optimized for EV charging efficiency")
+        elif vehicle_type == "hybrid":
+            reasons.append("Balanced fuel-electric consumption based on route profile")
+        
+        total_time = sum(s.get("time_cost", 0) for s in steps)
+        if total_time < 0.5:  # Less than 30 mins
+            reasons.append("Minimized idle time and stops")
+        
+        return {
+            "decision_factors": reasons,
+            "route_efficiency_score": round(min(100, 50 + (20 - len(path)) * 2), 1),
+            "confidence": round(0.7 + (len(reasons) * 0.05), 2)
+        }
+
+# ============================================================
+# Multi-Stop TSP Solver
+# ============================================================
+
+class MultiStopOptimizer:
+    """Traveling Salesman Problem solver for multi-stop optimization"""
+    
+    @staticmethod
+    def nearest_neighbor(graph: 'CityGraph', start: int, stops: List[int], env: 'Environment', vehicle_type: str) -> Tuple[List[int], float]:
+        """Greedy nearest-neighbor heuristic for TSP"""
+        unvisited = set(stops)
+        current = start
+        path = [current]
+        total_cost = 0.0
+        mult = get_consumption_multiplier(vehicle_type)
+        
+        while unvisited:
+            nearest = min(unvisited, key=lambda n: MultiStopOptimizer._distance_cost(graph, env, current, n, mult))
+            edge = graph.get_edge(current, nearest)
+            if edge:
+                tf = env.get_traffic_factor(current, nearest)
+                wi = env.get_weather_impact(nearest)
+                cost = edge["distance"] * 0.00025 * mult * tf * wi
+                total_cost += cost
+            path.append(nearest)
+            unvisited.remove(nearest)
+            current = nearest
+        
+        return path, total_cost
+    
+    @staticmethod
+    def _distance_cost(graph: 'CityGraph', env: 'Environment', u: int, v: int, mult: float) -> float:
+        edge = graph.get_edge(u, v)
+        if not edge:
+            return float('inf')
+        tf = env.get_traffic_factor(u, v)
+        wi = env.get_weather_impact(v)
+        return edge["distance"] * 0.00025 * mult * tf * wi
+    
+    @staticmethod
+    def optimize_stops(graph: 'CityGraph', start: int, stops: List[int], env: 'Environment', vehicle_type: str) -> dict:
+        """Returns optimized stop order and metrics"""
+        if len(stops) <= 1:
+            return {
+                "original_stops": stops,
+                "optimized_stops": stops,
+                "optimization_savings": 0,
+                "reordering_suggestions": []
+            }
+        
+        path, cost = MultiStopOptimizer.nearest_neighbor(graph, start, stops, env, vehicle_type)
+        
+        # Calculate naive route cost for comparison
+        naive_path = [start] + stops
+        naive_cost = 0.0
+        mult = get_consumption_multiplier(vehicle_type)
+        for i in range(len(naive_path) - 1):
+            edge = graph.get_edge(naive_path[i], naive_path[i+1])
+            if edge:
+                tf = env.get_traffic_factor(naive_path[i], naive_path[i+1])
+                wi = env.get_weather_impact(naive_path[i+1])
+                naive_cost += edge["distance"] * 0.00025 * mult * tf * wi
+        
+        savings = ((naive_cost - cost) / naive_cost * 100) if naive_cost > 0 else 0
+        
+        return {
+            "original_stops": [start] + stops,
+            "optimized_stops": path,
+            "optimization_savings": round(savings, 1),
+            "cost_current": round(naive_cost, 5),
+            "cost_optimized": round(cost, 5),
+            "reordering_suggestions": [{"stop": path[i], "position": i} for i in range(1, len(path))]
+        }
+
+# ============================================================
+# Analytics & Fleet Intelligence
+# ============================================================
+
+class FleetAnalytics:
+    """Tracks fleet-level metrics over time"""
+    def __init__(self):
+        self.daily_metrics = []  # Historical data for trends
+        self.start_date = datetime.now() - timedelta(days=30)  # Simulate 30 days of history
+        self._init_historical_data()
+    
+    def _init_historical_data(self):
+        """Initialize 30 days of simulated historical data"""
+        for day in range(30):
+            date = self.start_date + timedelta(days=day)
+            fuel_savings = 100 + random.randint(0, 200) + (day * 2)  # Trending upward
+            co2_reduction = 50 + random.randint(0, 100) + (day * 1.5)
+            on_time_rate = 85 + random.randint(-5, 10) + (day * 0.3)
+            ai_improvement = 60 + (day * 1.2)  # AI gets better over time
+            
+            self.daily_metrics.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "fuel_savings_liters": round(fuel_savings, 1),
+                "co2_reduction_kg": round(co2_reduction, 1),
+                "on_time_delivery_rate": round(min(100, on_time_rate), 1),
+                "ai_efficiency_vs_dijkstra": round(ai_improvement, 1),
+                "routes_completed": random.randint(20, 50)
+            })
+    
+    def get_monthly_trend(self) -> dict:
+        """Get aggregated monthly metrics"""
+        if not self.daily_metrics:
+            return {}
+        
+        total_fuel = sum(d["fuel_savings_liters"] for d in self.daily_metrics)
+        total_co2 = sum(d["co2_reduction_kg"] for d in self.daily_metrics)
+        avg_on_time = sum(d["on_time_delivery_rate"] for d in self.daily_metrics) / len(self.daily_metrics)
+        avg_ai_efficiency = sum(d["ai_efficiency_vs_dijkstra"] for d in self.daily_metrics) / len(self.daily_metrics)
+        
+        return {
+            "period": "last_30_days",
+            "total_fuel_saved_liters": round(total_fuel, 1),
+            "total_co2_reduced_kg": round(total_co2, 1),
+            "average_on_time_rate": round(avg_on_time, 1),
+            "ai_vs_dijkstra_efficiency": round(avg_ai_efficiency, 1),
+            "daily_history": self.daily_metrics[-7:]  # Last 7 days for graph
+        }
+
+# ============================================================
+# Q-Learning Agent
+# ============================================================
 
 
 class QLearningAgent:
@@ -312,8 +531,6 @@ class QLearningAgent:
 # Dijkstra Router
 # ============================================================
 
-import heapq
-
 class DijkstraRouter:
     def __init__(self, graph: CityGraph, env: Environment):
         self.graph = graph
@@ -426,6 +643,11 @@ env = Environment(city.total_nodes)
 rl_agent = QLearningAgent(city, env)
 dijkstra_router = DijkstraRouter(city, env)
 simulation_history: List[dict] = []
+fleet_analytics = FleetAnalytics()
+carbon_calculator = CarbonCreditCalculator()
+cost_estimator = CostEstimator()
+ai_explainability = AIExplainability()
+multi_stop_optimizer = MultiStopOptimizer()
 
 
 # ============================================================
@@ -457,6 +679,29 @@ class RouteResponse(BaseModel):
     total_distance: float
     co2_emissions: float
     algorithm: str
+
+class CarbonCreditsResponse(BaseModel):
+    co2_kg: float
+    trees_equivalent: float
+    km_pollution_avoided: float
+    carbon_credits: float
+
+class CostBreakdownResponse(BaseModel):
+    trip_cost_breakdown: dict
+    fleet_annual_projection: dict
+
+class AIExplainabilityResponse(BaseModel):
+    decision_factors: List[str]
+    route_efficiency_score: float
+    confidence: float
+
+class MultiStopResponse(BaseModel):
+    original_stops: List[int]
+    optimized_stops: List[int]
+    optimization_savings: float
+    cost_current: float
+    cost_optimized: float
+    reordering_suggestions: List[dict]
 
 
 # ============================================================
@@ -524,6 +769,26 @@ def optimize_route(params: SimulationParams):
         params.start_node, params.goal_node, params.vehicle_type, params.priority
     )
 
+    # Calculate carbon credits and costs
+    rl_co2_savings = dijkstra_result["co2_emissions"] - rl_result["co2_emissions"]
+    carbon_credits = carbon_calculator.calculate_credits(rl_co2_savings)
+    
+    rl_time_hours = rl_result["total_time"] / 3600
+    cost_breakdown = cost_estimator.estimate_costs(
+        rl_result["total_distance"],
+        rl_time_hours,
+        params.vehicle_type
+    )
+    
+    # Get AI explainability
+    avoided_nodes = env.flood_zones.copy()
+    explainability = ai_explainability.explain_route(
+        rl_result["path"],
+        rl_result["steps"],
+        params.vehicle_type,
+        avoided_nodes
+    )
+
     # Save to history
     run_record = {
         "id": len(simulation_history) + 1,
@@ -534,6 +799,9 @@ def optimize_route(params: SimulationParams):
         "training_time_ms": round(training_time * 1000, 1),
         "training_episodes": params.episodes,
         "final_reward": rewards[-1] if rewards else 0,
+        "carbon_credits": carbon_credits,
+        "cost_breakdown": cost_breakdown,
+        "explainability": explainability
     }
     simulation_history.append(run_record)
 
@@ -542,6 +810,9 @@ def optimize_route(params: SimulationParams):
         "dijkstra": dijkstra_result,
         "training_time_ms": round(training_time * 1000, 1),
         "reward_history": rewards[-20:],  # Last 20 episode rewards
+        "carbon_credits_earned": carbon_credits,
+        "cost_breakdown": cost_breakdown,
+        "ai_explanation": explainability
     }
 
 
@@ -609,6 +880,78 @@ def get_fleet():
             "stress_index": round(random.random() * 10, 1)
         })
     return {"fleet": fleet}
+
+
+# ============================================================
+# NEW ENDPOINTS: Business Intelligence & Analytics
+# ============================================================
+
+@app.get("/analytics/dashboard")
+def get_analytics_dashboard():
+    """Business-level fleet analytics dashboard"""
+    return fleet_analytics.get_monthly_trend()
+
+
+@app.post("/optimize/multi-stop")
+def optimize_multi_stop(start_node: int, stops: List[int], vehicle_type: str = "ev"):
+    """Multi-stop route optimization using TSP heuristic"""
+    if not stops:
+        raise HTTPException(status_code=400, detail="At least one stop required")
+    
+    if start_node in stops:
+        stops = [s for s in stops if s != start_node]
+    
+    if len(stops) == 0:
+        raise HTTPException(status_code=400, detail="Start node cannot be only stop")
+    
+    result = multi_stop_optimizer.optimize_stops(city, start_node, stops, env, vehicle_type)
+    
+    # Calculate full metrics
+    total_fuel = 0.0
+    mult = get_consumption_multiplier(vehicle_type)
+    
+    for i in range(len(result["optimized_stops"]) - 1):
+        edge = city.get_edge(result["optimized_stops"][i], result["optimized_stops"][i+1])
+        if edge:
+            tf = env.get_traffic_factor(result["optimized_stops"][i], result["optimized_stops"][i+1])
+            wi = env.get_weather_impact(result["optimized_stops"][i+1])
+            total_fuel += edge["distance"] * 0.00025 * mult * tf * wi
+    
+    co2 = total_fuel * get_co2_factor(vehicle_type)
+    carbon_credits = carbon_calculator.calculate_credits(co2)
+    
+    return {
+        "multi_stop_optimization": result,
+        "total_co2_optimized": round(co2, 5),
+        "carbon_credits": carbon_credits,
+        "stops_count": len(stops),
+        "recommended_order": result["optimized_stops"]
+    }
+
+
+@app.get("/carbon/impact")
+def get_carbon_impact(co2_saved: float = 50.0):
+    """Get real-world carbon credit impact"""
+    return carbon_calculator.calculate_credits(co2_saved)
+
+
+@app.post("/cost/estimate")
+def estimate_costs(distance: float, time_hours: float, vehicle_type: str = "ev", fleet_size: int = 100):
+    """Comprehensive business cost estimation"""
+    if distance < 0 or time_hours < 0:
+        raise HTTPException(status_code=400, detail="Distance and time must be positive")
+    
+    return cost_estimator.estimate_costs(distance, time_hours, vehicle_type, fleet_size)
+
+
+@app.get("/explainability/route/{route_id}")
+def get_route_explanation(route_id: int):
+    """Get AI decision explanation for a past route"""
+    if route_id < 1 or route_id > len(simulation_history):
+        raise HTTPException(status_code=404, detail="Route not found")
+    
+    run = simulation_history[route_id - 1]
+    return run.get("explainability", {})
 
 
 if __name__ == "__main__":

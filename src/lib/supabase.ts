@@ -1,13 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
+// Mock Supabase implementation - not using external service
+// Keeping the interface compatible for potential future use
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Mock supabase client
+export const supabase = {
+  auth: {
+    signUp: async (_credentials: any) => ({ data: null, error: null }),
+    signInWithPassword: async (_credentials: any) => ({ data: null, error: null }),
+    signOut: async () => ({ error: null }),
+    getSession: async () => ({ data: { session: null }, error: null })
+  },
+  from: (_table: string) => ({
+    select: () => ({ data: [], error: null }),
+    insert: (_data: any) => ({ data: null, error: null }),
+    update: (_data: any) => ({ data: null, error: null }),
+    delete: () => ({ error: null })
+  })
+};
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export interface CityNode {
   id: string;

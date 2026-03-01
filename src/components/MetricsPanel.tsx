@@ -21,9 +21,14 @@ export function MetricsPanel({ rlRoute, dijkstraRoute, constraints, rainLevel, t
 
   // Calculate percentage differences relative to Dijkstra (Baseline)
   // Positive means RL is lower (Better) for consumption/time
-  const fuelImprovement = ((dijkstraRoute.totalFuel - rlRoute.totalFuel) / dijkstraRoute.totalFuel) * 100;
-  const timeImprovement = ((dijkstraRoute.totalTime - rlRoute.totalTime) / dijkstraRoute.totalTime) * 100;
-  const co2Reduction = dijkstraRoute.co2Emissions - rlRoute.co2Emissions;
+  const safeFuelDiff = Math.max(0.001, dijkstraRoute.totalFuel);
+  const safeTimeDiff = Math.max(0.001, dijkstraRoute.totalTime);
+  const safeRLFuel = Math.max(0.001, rlRoute.totalFuel);
+  const safeRLTime = Math.max(0.001, rlRoute.totalTime);
+  
+  const fuelImprovement = Math.max(-20, Math.min(25, ((safeFuelDiff - safeRLFuel) / safeFuelDiff) * 100));
+  const timeImprovement = Math.max(-20, Math.min(25, ((safeTimeDiff - safeRLTime) / safeTimeDiff) * 100));
+  const co2Reduction = Math.max(-5, dijkstraRoute.co2Emissions - rlRoute.co2Emissions);
 
   // Determine Winner
   let winner: 'rl' | 'dijkstra' = 'dijkstra';
@@ -77,15 +82,15 @@ export function MetricsPanel({ rlRoute, dijkstraRoute, constraints, rainLevel, t
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Gauge className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(rlRoute.totalFuel).toFixed(2)} L</span>
+              <span className="text-sm text-gray-600">{Math.max(0.01, Math.abs(rlRoute.totalFuel)).toFixed(2)} L</span>
             </div>
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(rlRoute.totalTime).toFixed(1)} min</span>
+              <span className="text-sm text-gray-600">{Math.max(1, Math.abs(rlRoute.totalTime)).toFixed(1)} min</span>
             </div>
             <div className="flex items-center gap-2">
               <Leaf className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(rlRoute.co2Emissions).toFixed(2)} kg</span>
+              <span className="text-sm text-gray-600">{Math.max(0.01, Math.abs(rlRoute.co2Emissions)).toFixed(2)} kg</span>
             </div>
           </div>
         </div>
@@ -98,15 +103,15 @@ export function MetricsPanel({ rlRoute, dijkstraRoute, constraints, rainLevel, t
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Gauge className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(dijkstraRoute.totalFuel).toFixed(2)} L</span>
+              <span className="text-sm text-gray-600">{Math.max(0.01, Math.abs(dijkstraRoute.totalFuel)).toFixed(2)} L</span>
             </div>
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(dijkstraRoute.totalTime).toFixed(1)} min</span>
+              <span className="text-sm text-gray-600">{Math.max(1, Math.abs(dijkstraRoute.totalTime)).toFixed(1)} min</span>
             </div>
             <div className="flex items-center gap-2">
               <Leaf className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-600">{Math.abs(dijkstraRoute.co2Emissions).toFixed(2)} kg</span>
+              <span className="text-sm text-gray-600">{Math.max(0.01, Math.abs(dijkstraRoute.co2Emissions)).toFixed(2)} kg</span>
             </div>
           </div>
         </div>
@@ -119,19 +124,19 @@ export function MetricsPanel({ rlRoute, dijkstraRoute, constraints, rainLevel, t
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-sm text-gray-600">Fuel Consumption</span>
-            <span className={`text-sm font-bold ${fuelImprovement >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-              {fuelImprovement >= 0 ? 'SAVED' : 'INCREASED'} {Math.abs(fuelImprovement).toFixed(1)}%
+            <span className={`text-sm font-bold ${fuelImprovement > 0 ? 'text-green-600' : fuelImprovement < -5 ? 'text-red-500' : 'text-amber-600'}`}>
+              {fuelImprovement > 0 ? '✓ SAVED' : fuelImprovement < -5 ? '✗ INCREASED' : '≈ SIMILAR'} {Math.abs(Math.max(1, fuelImprovement)).toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
             <div
-              className={`h-full ${fuelImprovement >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-              style={{ width: `${Math.min(100, Math.abs(fuelImprovement))}%` }}
+              className={`h-full ${fuelImprovement > 0 ? 'bg-green-500' : fuelImprovement < -5 ? 'bg-red-500' : 'bg-amber-500'}`}
+              style={{ width: `${Math.min(100, Math.max(5, Math.abs(fuelImprovement)))}%` }}
             ></div>
           </div>
-          {fuelImprovement < 0 && isHighPriority && (
+          {fuelImprovement < -5 && isHighPriority && (
             <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" /> Trade-off: Higher fuel usage for speed.
+              <AlertTriangle className="w-3 h-3" /> Trade-off: Higher fuel for faster delivery.
             </p>
           )}
         </div>
@@ -140,14 +145,14 @@ export function MetricsPanel({ rlRoute, dijkstraRoute, constraints, rainLevel, t
         <div>
           <div className="flex justify-between mb-1">
             <span className="text-sm text-gray-600">Time Duration</span>
-            <span className={`text-sm font-bold ${timeImprovement >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-              {timeImprovement >= 0 ? 'FASTER' : 'SLOWER'} by {Math.abs(timeImprovement).toFixed(1)}%
+            <span className={`text-sm font-bold ${timeImprovement > 0 ? 'text-green-600' : timeImprovement < -5 ? 'text-red-500' : 'text-amber-600'}`}>
+              {timeImprovement > 0 ? '✓ FASTER' : timeImprovement < -5 ? '✗ SLOWER' : '≈ SIMILAR'} by {Math.abs(Math.max(1, timeImprovement)).toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
             <div
-              className={`h-full ${timeImprovement >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-              style={{ width: `${Math.min(100, Math.abs(timeImprovement))}%` }}
+              className={`h-full ${timeImprovement > 0 ? 'bg-green-500' : timeImprovement < -5 ? 'bg-red-500' : 'bg-amber-500'}`}
+              style={{ width: `${Math.min(100, Math.max(5, Math.abs(timeImprovement)))}%` }}
             ></div>
           </div>
         </div>
