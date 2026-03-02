@@ -167,16 +167,3 @@ src/
 │   └── ControlPanel.tsx
 ├── types/             # TypeScript definitions
 └── lib/               # Supabase client
-```
-
-## Judge's Notes
-
-This prototype demonstrates:
-
-1. **Technical Depth**: Full RL implementation with proper state-action-reward design
-2. **Real-World Applicability**: Multi-factor optimization matches logistics challenges
-3. **Visual Impact**: Animated side-by-side comparison makes results immediately clear
-4. **Scalability**: Modular architecture ready for production features
-5. **Data-Driven**: All runs persisted for analysis and model improvement
-
-Built for hackathon evaluation - production-ready foundation with clear path to deployment.
